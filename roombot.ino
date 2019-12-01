@@ -69,7 +69,7 @@
 
 #define ROSSERIAL_BAUD_RATE 57600
 
-#define ROS_TWIST_TOPIC "twist"       // geometry_msgs::Twist
+#define ROS_TWIST_TOPIC "cmd_vel"       // geometry_msgs::Twist
 // TODO replace this with the standard Joy message limited to 10 Hz
 #define ROS_BUTTONS_TOPIC "buttons"   // std_msgs::String (expecting 10 space delimited numbers)
 
@@ -110,20 +110,22 @@ class SerialBridge : public HardwareSerial {
 
 ros::NodeHandle nh;
 char message[32];
-int vel = 0;
-int rad = 0;
-#define tiltMax 600  // corresponds to lowest camera angle
-#define tiltMin 150   // corresponds to highest camera angle
-#define tiltDefault 380  // the initial camera angle
-int tilt = 0;
-int newTilt = tiltDefault;
+int vel = 0;                    // linear velocity
+int rad = 0;                    // turn radius
+#define TILT_MAX 600            // corresponds to lowest camera angle
+#define TILT_MIN 150            // corresponds to highest camera angle
+#define TILT_ANGLE_RANGE 140    // degrees between lowest and highest angle
+#define TILT_MAX_RAD 1.047198   // highest camera angle in radians (60 deg)
+#define TILT_MIN_RAD -1.396263  // lowest camera angle in radians (-80 deg)
+float tilt = -0.11;             // tilt position in degrees
+float tiltVel = 0.0;            // tilt velocity in radians per second
+long timeMillis = 0;            // last timestamp in milliseconds
 
 void on_twist(const geometry_msgs::Twist& twist_msg) {
   vel = twist_msg.linear.y;
   rad = twist_msg.angular.z;
-  float tiltAngle = min(70, max(twist_msg.angular.x, -30));
-  newTilt = map(tiltAngle, -30, 70, tiltMax, tiltMin);
-  sprintf(message, "vel=%d, rad=%d", vel, rad);
+  tiltVel = twist_msg.angular.x;
+  sprintf(message, "t=%d, tv=%d", (int)(tilt*1000), (int)(tiltVel*1000));
   nh.loginfo(message);
 }
 
@@ -183,15 +185,15 @@ uint8_t bump = 0;
 uint8_t wall = 0;
 
 void loop() {
-  roomba.getSensors(Roomba::SensorBumpsAndWheelDrops, &bump, 1);
-  bump &= 1; // left bump sensor is not working, so check only the right one
-  if (bump > 0) {
-    //sprintf(message, "bump: %d", bump);
-    //nh.loginfo(message);
-    if (vel > 0 && !(rad == 1 || rad == -1)) {
-      vel = 0;
-    }
-  }
+//  roomba.getSensors(Roomba::SensorBumpsAndWheelDrops, &bump, 1);
+//  bump &= 1; // left bump sensor is not working, so check only the right one
+//  if (bump > 0) {
+//    //sprintf(message, "bump: %d", bump);
+//    //nh.loginfo(message);
+//    if (vel > 0 && !(rad == 1 || rad == -1)) {
+//      vel = 0;
+//    }
+//  }
 /*
   roomba.getSensors(Roomba::SensorWall, &wall, 1);
   wall &= 1;
@@ -207,11 +209,14 @@ void loop() {
   nh.spinOnce();
   
   roomba.drive(vel, rad);
-  
-  if (newTilt != tilt) {
-    tilt = newTilt;
-    pwm.setPWM(PWM_TILT_CHANNEL, 0, tilt);
-  }
+
+  // move the camera servo
+  long durationMillis = millis() - timeMillis;
+  tilt += tiltVel * durationMillis/1000.0;  // calculate change in position given previous position and velocity
+  tilt = max(TILT_MIN_RAD, min(tilt, TILT_MAX_RAD));
+  int tiltPulse = map(tilt * 100000L, TILT_MIN_RAD * 100000L, TILT_MAX_RAD * 100000L, TILT_MIN, TILT_MAX);
+  pwm.setPWM(PWM_TILT_CHANNEL, 0, tiltPulse);
+  timeMillis += durationMillis;
   
   if (b9 == 1 && waitForReleaseStart == false && isVacuuming == false) {
     isVacuuming = true;
