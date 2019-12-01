@@ -52,7 +52,8 @@
 #include <HardwareSerial.h>
 #include <HardwareSerial_private.h>
 #include <SoftwareSerial.h>
-#include <Servo.h>
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
 #include <Roomba.h>
 
 /**
@@ -64,7 +65,7 @@
 #define ROOMBA_RXD 7  // Arduino Rx pin connected to Roomba Rx
 #define ROOMBA_TXD 6  // Arduino Tx pin connected to Roomba Tx
 
-#define TILT_SERVO_PIN 9
+#define PWM_TILT_CHANNEL 15
 
 #define ROSSERIAL_BAUD_RATE 57600
 
@@ -111,9 +112,9 @@ ros::NodeHandle nh;
 char message[32];
 int vel = 0;
 int rad = 0;
-#define tiltMax 180  // corresponds to lowest camera angle
-#define tiltMin 50   // corresponds to highest camera angle
-#define tiltDefault 110  // the initial camera angle
+#define tiltMax 600  // corresponds to lowest camera angle
+#define tiltMin 150   // corresponds to highest camera angle
+#define tiltDefault 380  // the initial camera angle
 int tilt = 0;
 int newTilt = tiltDefault;
 
@@ -150,12 +151,14 @@ SoftwareSerial roombaSerial(ROOMBA_RXD, ROOMBA_TXD); // RX, TX
 SerialBridge serialBridge(&roombaSerial);
 Roomba roomba(&serialBridge, Roomba::Baud115200);  //Create a roomba object at 115200 BPS, the default for 500 Series Roombas
 
-Servo tiltServo;
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 void setup() {
   pinMode(A0, INPUT_PULLUP);
-  tiltServo.attach(TILT_SERVO_PIN);
   
+  pwm.begin();
+  pwm.setPWMFreq(60);  // Analog servos run at ~60 Hz updates
+
   Serial.begin(ROSSERIAL_BAUD_RATE);
   
   nh.initNode();
@@ -166,6 +169,8 @@ void setup() {
   roomba.power();
   roomba.start();
   roomba.safeMode();
+
+  delay(10);
 }
 
 int color = 200;
@@ -205,7 +210,7 @@ void loop() {
   
   if (newTilt != tilt) {
     tilt = newTilt;
-    tiltServo.write(tilt);
+    pwm.setPWM(PWM_TILT_CHANNEL, 0, tilt);
   }
   
   if (b9 == 1 && waitForReleaseStart == false && isVacuuming == false) {
